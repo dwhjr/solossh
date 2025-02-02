@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOLOSSH Client</title>
+
+    <!-- Local Bootstrap -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+
+    <!-- Local Xterm.js -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='xterm/xterm.css') }}">
+    <script src="{{ url_for('static', filename='xterm/xterm.js') }}"></script>
+
+    <style>
+        #newSession {
+            position: absolute;
+            top: 20px;
+            right: 40px;
+            background-color: black;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        #newSession:hover {
+            background-color: red;
+        }
+    </style>
+</head>
+    <style>
+       body {
+        background-color: #f7f7fa;   
+        padding: 20px 40px 40px;
+       }
+    </style>
+    <div class="d-flex justify-content-between align-items-center">
+        <h1 class="display fw-bold">
+            <span style="color: #ff0000;">SOLO</span><span style="color: #004999;">SSH Client</span>
+        </h1>
+        <button id="newSession" class="btn btn=dark">New Session</button>
+    </div>
+        <form id="sshForm">
+            <div class="mb-3">
+                <input type="text" id="host" name="host" class="form-control" placeholder="Enter Hostname/IP" required>
+            </div>
+            <div class="mb-3">
+                <input type="number" id="port" name="port" class="form-control" placeholder="Port (default: 22)" value="22" required>
+            </div>
+            <div class="mb-3">
+                <select id="authType" class="form-control" required>
+                    <option value="" disabled selected>Choose Authentication Type</option>
+                    <option value="password">Password Authentication</option>
+                    <option value="key">Key File Authentication</option>
+                    <option value="key+passphrase">Key + Passphrase</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <input type="text" id="username" name="username" class="form-control" placeholder="Enter Username" required>
+            </div>
+            <div class="mb-3" id="passwordField">
+                <input type="password" id="password" name="password" class="form-control" placeholder="Enter Password">
+            </div>
+            <div class="mb-3" id="keyField" style="display: none;">
+                <input type="file" id="keyFile" name="keyFile" class="form-control">
+            </div>
+            <div class="mb-3" id="passphraseField" style="display: none;">
+                <input type="password" id="passphrase" name="passphrase" class="form-control" placeholder="Enter Passphrase (if required)">
+            </div>
+            <button type="submit" class="btn btn-primary">Connect</button>
+        </form>
+        
+        <div id="statusBox" class="mt-4 border p-3 rounded shadow bg-light">
+            <h5>Connection Status:</h5>
+            <div id="statusMessages"></div>
+        </div>
+
+        <div id="terminal-container" class="mt-4" style="display:none;">
+            <h5>Terminal:</h5>
+            <h7>In the terminal window hit your enter key to begin</h7>
+            <div id="terminal" class="border p-3 text-start" style="height: 700px; overflow-y: auto; background-color: #000; color: #fff;"></div>
+        </div>
+    </div>
+
+    <script>
+        let sessionId = null;
+        const term = new Terminal({ cursorBlink: true });
+        let commandBuffer = "";
+
+        document.getElementById("authType").addEventListener("change", function() {
+            const authType = this.value;
+            document.getElementById("passwordField").style.display = (authType === "password") ? "block" : "none";
+            document.getElementById("keyField").style.display = (authType === "key" || authType === "key+passphrase") ? "block" : "none";
+            document.getElementById("passphraseField").style.display = (authType === "key+passphrase") ? "block" : "none";
+        });
+
+        document.getElementById("sshForm").addEventListener("submit", function(event) {
+            event.preventDefault();
+            const host = document.getElementById("host").value;
+            const port = document.getElementById("port").value;
+            const username = document.getElementById("username").value;
+            const authType = document.getElementById("authType").value;
+            let formData = { host, port, username, auth_type: authType };
+            addStatusMessage("Connecting...");
+            
+            if (authType === "password") {
+                formData.password = document.getElementById("password").value;
+                sendRequest(formData);
+            } else {
+                const keyFile = document.getElementById("keyFile").files[0];
+                if (keyFile) {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        formData.key_file = btoa(event.target.result);
+                        if (authType === "key+passphrase") {
+                            formData.passphrase = document.getElementById("passphrase").value;
+                        }
+                        sendRequest(formData);
+                    };
+                    reader.readAsText(keyFile);
+                } else {
+                    alert("Please select a key file.");
+                    return;
+                }
+            }
+        });
+
+        function sendRequest(data) {
+            fetch('/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                setTimeout(() => {
+                    if (data.status === "success") {
+                        sessionId = data.session_id;
+                        document.getElementById("terminal-container").style.display = "block";
+                        addStatusMessage("✅ Connection Established");
+                        startTerminalSession();
+                    } else {
+                        addStatusMessage("❌ Connection Failed: " + (data.error || "Unknown error"));
+                    }
+                }, 5000);
+            });
+        }
+
+        function addStatusMessage(message) {
+            const statusBox = document.getElementById("statusMessages");
+            const newMessage = document.createElement("p");
+            newMessage.innerHTML = message;
+            statusBox.appendChild(newMessage);
+        }
+
+        function startTerminalSession() {
+            if (!sessionId) return;
+            term.open(document.getElementById("terminal"));
+            term.writeln("Connected to SSH Server...");
+
+            term.onData(data => {
+                if (data === "\r") {  // Enter key
+                    term.write("\r\n");
+                    fetch('/send_command', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: sessionId, command: commandBuffer })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === "success") {
+                            setTimeout(updateTerminal, 500);  // Fetch output immediately after command
+                        } else {
+                            term.writeln("Error: " + data.error);
+                        }
+                    });
+                    commandBuffer = "";
+                } else {
+                    commandBuffer += data; // Store typed characters in buffer
+                    term.write(data); // Display typed characters in terminal
+                }
+            });
+        }
+
+        function updateTerminal() {
+            if (!sessionId) return;
+            fetch('/get_output?session_id=' + sessionId)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === "success") {
+                    term.write("\r\n" + data.output);
+                }
+            });
+        }
+
+        // New session button functionality
+        document.getElementById("newSession").addEventListener("click", function() {
+            location.reload();
+        });
+
+    </script>
+<div class="footer-container text-center mt-4">
+    <p class="d-inline-block">
+        &copy; 2025 Solo Orbit Technologies - Powered by 
+        <img src="https://solo-orbit.com/solo-orbit-img.webp" alt="Solo Orbit Logo" style="vertical-align: middle; width: 40px; height: auto; margin-left: 5px;">
+    </p>
+</div>
+</body>
+</html>
+

@@ -1,0 +1,11 @@
+services:
+  solossh:
+    build: .
+    container_name: solossh
+    restart: always
+    ports:
+      - "5003:5003"
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: ["/app/venv/bin/python", "app.py"]
