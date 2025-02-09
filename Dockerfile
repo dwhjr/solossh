@@ -1,32 +1,31 @@
-# Use official Python 3.11 image (latest)
 FROM python:3.11
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Install necessary dependencies
-RUN apt-get update && apt-get install -y bash && rm -rf /var/lib/apt/lists/*
+# Install system dependencies including NGINX
+RUN apt-get update && apt-get install -y \
+    nginx \
+    bash \
+    libssl-dev \
+    libffi-dev \
+    build-essential \
+    python3-dev \
+    python3-pip \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the project files into the container
+# Copy application files
 COPY . /app
 
-# Ensure venv is properly created and activated inside the container
-RUN python -m venv /app/venv && \
-    /app/venv/bin/python -m ensurepip && \
-    /app/venv/bin/pip install --upgrade pip && \
-    /app/venv/bin/pip install -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Set the virtual environment as default
-ENV PATH="/app/venv/bin:$PATH"
+# Copy NGINX configuration file
+COPY nginx.conf /etc/nginx/nginx.conf
 
-# Expose the application port
-EXPOSE 5003
+# Expose port 80 for web access
+EXPOSE 80
 
-# Use an entrypoint script to ensure venv activation
-ENTRYPOINT ["/bin/bash", "-c", "source /app/venv/bin/activate && exec python app.py"]
-
-
-
-
-
-
+# Start NGINX and the Python app
+ENTRYPOINT ["bash", "-c", "service nginx start && python3 /app/app.py"]
